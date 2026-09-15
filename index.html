@@ -39,7 +39,14 @@
     p.lead {
       margin: 0 0 36px;
       font-size: 1.2rem;
-      max-width: 28em;
+      max-width: 36em;
+      line-height: 1.35;
+    }
+    .harness {
+      display: block;
+      font-size: .95rem;
+      letter-spacing: .03em;
+      opacity: .7;
     }
     ul {
       list-style: none;
@@ -63,12 +70,6 @@
       background: rgba(255,248,230,.7);
       transform: rotate(0deg) translate(-1px, -1px);
     }
-    .folder {
-      display: block;
-      font-size: .85rem;
-      letter-spacing: .04em;
-      opacity: .65;
-    }
     .title {
       font-family: Caveat, cursive;
       font-size: 1.85rem;
@@ -80,15 +81,15 @@
 <body>
   <main>
     <h1>Retro Tetris</h1>
-    <p class="lead">Siete variantes en el mismo sitio. Elegí una y se abre su propio index.</p>
+    <p class="lead">Las siete variantes se hicieron con el mismo modelo local, corrido sobre harnesses distintos. Lo que cambia no es el modelo: es Claude Code, Codex, Droid, Hermes, OMP, OpenCode y Pi, en ese orden. Elegí una y se abre su index.</p>
     <ul>
-      <li><a href="tetris-cc/" style="--tilt:-.4deg"><span class="folder">tetris-cc</span><span class="title">Paper Tetris</span></a></li>
-      <li><a href="tetris-codex/" style="--tilt:.5deg"><span class="folder">tetris-codex</span><span class="title">TETRIS · VHS Edition</span></a></li>
-      <li><a href="tetris-droid/" style="--tilt:-.2deg"><span class="folder">tetris-droid</span><span class="title">Film grain edition</span></a></li>
-      <li><a href="tetris-hermes/" style="--tilt:.6deg"><span class="folder">tetris-hermes</span><span class="title">Hand-drawn retro</span></a></li>
-      <li><a href="tetris-omp/" style="--tilt:-.5deg"><span class="folder">tetris-omp</span><span class="title">Tetris — hand-drawn</span></a></li>
-      <li><a href="tetris-opencode/" style="--tilt:.3deg"><span class="folder">tetris-opencode</span><span class="title">Crayon on Paper</span></a></li>
-      <li><a href="tetris-pi/" style="--tilt:-.3deg"><span class="folder">tetris-pi</span><span class="title">Paper &amp; Grain</span></a></li>
+      <li><a href="tetris-cc/" style="--tilt:-.4deg"><span class="harness">Claude Code</span><span class="title">Paper Tetris</span></a></li>
+      <li><a href="tetris-codex/" style="--tilt:.5deg"><span class="harness">Codex</span><span class="title">TETRIS · VHS Edition</span></a></li>
+      <li><a href="tetris-droid/" style="--tilt:-.2deg"><span class="harness">Droid</span><span class="title">Film grain edition</span></a></li>
+      <li><a href="tetris-hermes/" style="--tilt:.6deg"><span class="harness">Hermes</span><span class="title">Hand-drawn retro</span></a></li>
+      <li><a href="tetris-omp/" style="--tilt:-.5deg"><span class="harness">OMP</span><span class="title">Tetris — hand-drawn</span></a></li>
+      <li><a href="tetris-opencode/" style="--tilt:.3deg"><span class="harness">OpenCode</span><span class="title">Crayon on Paper</span></a></li>
+      <li><a href="tetris-pi/" style="--tilt:-.3deg"><span class="harness">Pi</span><span class="title">Paper &amp; Grain</span></a></li>
     </ul>
   </main>
 </body>
