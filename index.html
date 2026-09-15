@@ -76,12 +76,51 @@
       font-weight: 700;
       line-height: 1;
     }
-  </style>
+    .prompt-label {
+      margin: 0 0 8px;
+      font-size: 1.05rem;
+    }
+    blockquote.prompt {
+      margin: 0 0 20px;
+      padding: 16px 18px;
+      border: 2px dashed var(--ink);
+      background: rgba(255,255,255,.35);
+      transform: rotate(-.4deg);
+    }
+    blockquote.prompt p {
+      margin: 0;
+      font-size: 1.08rem;
+      line-height: 1.4;
+    }
+    figure.ref {
+      margin: 0 0 36px;
+      transform: rotate(.5deg);
+    }
+    figure.ref img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 2px solid var(--ink);
+      box-shadow: 4px 4px 0 rgba(42,34,24,.16);
+    }
+    figure.ref figcaption {
+      margin-top: 8px;
+      font-size: .95rem;
+      opacity: .7;
+    }
 </head>
 <body>
   <main>
     <h1>Retro Tetris</h1>
     <p class="lead">Las siete variantes se hicieron con el mismo modelo local, corrido sobre harnesses distintos. Lo que cambia no es el modelo: es Claude Code, Codex, Droid, Hermes, OMP, OpenCode y Pi, en ese orden. Elegí una y se abre su index.</p>
+    <p class="prompt-label">El prompt que se le pasó a todos fue el mismo:</p>
+    <blockquote class="prompt">
+      <p>Build me a Retro Tetris game with film grain effects. The grain effect needs to be rolling when playing. Include game sound, optional music, and great graphic effects + movement. Use the referenced image.</p>
+    </blockquote>
+    <figure class="ref">
+      <img src="reference.jpg" alt="Imagen de referencia: Tetris dibujado a lápiz sobre papel cuadriculado, con Next, Score y Level">
+      <figcaption>Imagen de referencia adjunta al prompt.</figcaption>
+    </figure>
     <ul>
       <li><a href="tetris-cc/" style="--tilt:-.4deg"><span class="harness">Claude Code</span><span class="title">Paper Tetris</span></a></li>
       <li><a href="tetris-codex/" style="--tilt:.5deg"><span class="harness">Codex</span><span class="title">TETRIS · VHS Edition</span></a></li>
