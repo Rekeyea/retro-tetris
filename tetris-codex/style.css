@@ -1,0 +1,60 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  background: #04050a;
+  overflow: hidden;
+  font-family: "Courier New", monospace;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(1200px 700px at 50% 42%, #0b1026 0%, #05060d 55%, #020308 100%);
+}
+
+#stage {
+  position: relative;
+  line-height: 0;
+}
+
+#game {
+  width: min(96vw, calc(96vh * 1040 / 680));
+  height: auto;
+  image-rendering: pixelated;
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 2px #10131f,
+    0 0 40px rgba(0, 240, 255, 0.10),
+    0 0 120px rgba(255, 0, 229, 0.08),
+    0 30px 80px rgba(0, 0, 0, 0.8);
+  cursor: pointer;
+}
+
+#boot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 3.5%;
+  pointer-events: none;
+  line-height: 1.4;
+}
+
+#boot p {
+  color: #9fd8ff;
+  font-size: clamp(10px, 1.4vw, 15px);
+  letter-spacing: 0.35em;
+  text-shadow: 0 0 12px rgba(0, 240, 255, 0.8);
+  animation: bootBlink 1.1s steps(2, jump-none) infinite;
+}
+
+@keyframes bootBlink {
+  0%, 60% { opacity: 1; }
+  61%, 100% { opacity: 0.15; }
+}
+
+#boot.hidden { display: none; }

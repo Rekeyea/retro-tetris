@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RETRO TETRIS — film grain edition</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Patrick+Hand&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#3d3a33;
+    --paper:#e8e0c9;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    background:#17140f;
+    overflow:hidden;
+    font-family:'Patrick Hand','Segoe Print','Comic Sans MS',cursive;
+    color:var(--ink);
+    -webkit-user-select:none;user-select:none;
+  }
+  #wrap{
+    position:fixed;inset:0;
+    display:flex;align-items:center;justify-content:center;
+  }
+  #stage{
+    position:relative;
+    box-shadow:0 30px 80px rgba(0,0,0,.75), 0 0 0 1px rgba(0,0,0,.4);
+  }
+  canvas{display:block}
+  #paper,#game{position:absolute;inset:0}
+  #grain{
+    position:absolute;inset:0;
+    pointer-events:none;
+    mix-blend-mode:overlay;
+    opacity:.38;
+  }
+  #vignette{
+    position:absolute;inset:0;pointer-events:none;
+    background:
+      radial-gradient(ellipse at 50% 46%, rgba(0,0,0,0) 52%, rgba(30,20,8,.28) 82%, rgba(15,8,2,.55) 100%);
+  }
+  #flash{position:absolute;inset:0;pointer-events:none;background:#fff;opacity:0}
+  #hud{
+    position:absolute;top:0;right:0;bottom:0;
+    display:flex;flex-direction:column;align-items:flex-end;
+    justify-content:flex-end;
+    padding:0 2.2vw 2.2vh;
+    pointer-events:none;
+  }
+  #musicBtn{
+    pointer-events:auto;
+    font-family:inherit;font-size:clamp(13px,1.5vh,20px);
+    color:#4a463c;
+    background:transparent;
+    border:2px solid #6b665a;
+    border-radius:10px 14px 9px 13px / 13px 9px 14px 10px;
+    padding:.35vh 1.1vw;
+    cursor:pointer;
+    transform:rotate(-1deg);
+    transition:transform .12s, background .12s;
+  }
+  #musicBtn:hover{background:rgba(90,85,70,.12);transform:rotate(-1deg) scale(1.05)}
+  #musicBtn .led{
+    display:inline-block;width:.55em;height:.55em;border-radius:50%;
+    background:#8a8577;margin-right:.4em;vertical-align:baseline;
+    box-shadow:inset 0 0 2px rgba(0,0,0,.4);
+  }
+  #musicBtn.on .led{background:#5d8a4a;box-shadow:0 0 6px rgba(93,138,74,.8)}
+  #touch{
+    position:absolute;left:0;bottom:0;right:0;
+    display:none;
+    justify-content:space-between;
+    padding:10px 14px;
+    gap:8px;
+  }
+  #touch button{
+    font-family:inherit;font-size:20px;
+    background:rgba(70,65,52,.85);color:#e8e0c9;
+    border:none;border-radius:12px;
+    padding:12px 16px;
+    touch-action:none;
+  }
+  @media (pointer:coarse){ #touch{display:flex} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="paper"></canvas>
+    <canvas id="game"></canvas>
+    <canvas id="grain"></canvas>
+    <div id="vignette"></div>
+    <div id="flash"></div>
+    <div id="hud">
+      <button id="musicBtn" class="on"><span class="led"></span>MUSIC</button>
+    </div>
+    <div id="touch">
+      <button data-a="left">◀</button>
+      <button data-a="down">▼</button>
+      <button data-a="rot">⟳</button>
+      <button data-a="drop">⤓</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ============================================================
+   RETRO TETRIS — film grain edition
+   Paper & crayon art, rolling grain, synthesized audio.
+   ============================================================ */
+
+/* ---------- layout ---------- */
+const COLS = 10, ROWS = 20;
+let W = 0, H = 0, scale = 1;        // scale = px per cell
+let bx = 0, by = 0;                 // board origin (px)
+let cell = 32;
+
+const stage   = document.getElementById('stage');
+const paperC  = document.getElementById('paper');
+const gameC   = document.getElementById('game');
+const grainC  = document.getElementById('grain');
+const pctx = paperC.getContext('2d');
+const gctx = gameC.getContext('2d');
+const grctx = grainC.getContext('2d');
+const flashEl = document.getElementById('flash');
+const musicBtn = document.getElementById('musicBtn');
+
+function resize(){
+  const hudW = Math.round(window.innerWidth * 0.30);
+  const availW = window.innerWidth - hudW - 24;
+  const availH = window.innerHeight - 24;
+  const s = Math.floor(Math.min(availW / COLS, availH / ROWS));
+  scale = Math.max(14, Math.min(s, 52));
+  const bw = scale * COLS, bh = scale * ROWS;
+  W = Math.max(320, bw + hudW + 40);
+  H = bh + 60;
+  for (const c of [paperC, gameC]){
+    c.width = W; c.height = H;
+  }
+  grainC.width = Math.ceil(W / 2);
+  grainC.height = Math.ceil(H / 2);
+  grainC.style.width = W + 'px';
+  grainC.style.height = H + 'px';
+  stage.style.width = W + 'px';
+  stage.style.height = H + 'px';
+  bx = Math.round((W - hudW - bw) / 2);
+  by = 30;
+  cell = scale;
+  buildTiles();
+  drawPaper();
+}
+window.addEventListener('resize', resize);
+
+/* ---------- palette (muted crayon, from the reference) ---------- */
+const PALETTE = [
+  null,
+  { base:'#4a7ec9', dark:'#2c5591', lite:'#83aade' }, // I blue
+  { base:'#8b5fd4', dark:'#5d3b96', lite:'#b191e2' }, // O purple
+  { base:'#d4502f', dark:'#93301b', lite:'#e4876d' }, // T red
+  { base:'#43a05f', dark:'#2b6c40', lite:'#7cc493' }, // S green
+  { base:'#3f9db3', dark:'#2a6d80', lite:'#7cc4d4' }, // Z teal
+  { base:'#e0a52e', dark:'#a4741a', lite:'#ecc36a' }, // L yellow
+  { base:'#d97a26', dark:'#9c5315', lite:'#e5a45e' }, // J orange
+];
+
+/* ---------- hand-drawn helpers ---------- */
+function mkCanvas(w, h){ const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+
+function wobblyRect(ctx, x, y, w, h, mag, pass, seed){
+  // one pass of a sketchy line around a rect
+  const r = (n) => { const s = Math.sin(seed * 12.9898 + pass * 78.233 + n * 37.719) * 43758.5453; return (s - Math.floor(s)) * 2 - 1; };
+  const p = mag * 0.9;
+  ctx.beginPath();
+  const pts = [
+    [x + r(1)*p, y + r(2)*p], [x + w/2 + r(3)*p, y + r(4)*p], [x + w + r(5)*p, y + r(6)*p],
+    [x + w + r(7)*p, y + h/2 + r(8)*p], [x + w + r(9)*p, y + h + r(10)*p],
+    [x + w/2 + r(11)*p, y + h + r(12)*p], [x + r(13)*p, y + h + r(14)*p],
+    [x + r(15)*p, y + h/2 + r(16)*p], [x + r(1)*p, y + r(2)*p]
+  ];
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.stroke();
+}
+
+/* crayon-scribble fill texture per cell color */
+let tiles = [];
+function buildTiles(){
+  tiles = [null];
+  const s = Math.max(8, Math.round(scale));
+  for (let c = 1; c <= 7; c++){
+    const variants = [];
+    for (let v = 0; v < 3; v++){
+      const t = mkCanvas(s, s);
+      const tc = t.getContext('2d');
+      const col = PALETTE[c];
+      tc.fillStyle = col.base;
+      tc.fillRect(0, 0, s, s);
+      // scribble streaks
+      tc.lineCap = 'round';
+      const n = 6 + v * 2;
+      for (let i = 0; i < n; i++){
+        const yy = (i + 0.5) / n * s + (Math.random() - .5) * s * .18;
+        tc.strokeStyle = i % 2 ? col.lite : col.dark;
+        tc.globalAlpha = 0.28 + Math.random() * 0.22;
+        tc.lineWidth = s * (0.06 + Math.random() * 0.07);
+        tc.beginPath();
+        const x0 = -s * .1, x1 = s * 1.1;
+        tc.moveTo(x0, yy);
+        tc.quadraticCurveTo(s * .5, yy + (Math.random() - .5) * s * .3, x1, yy + (Math.random() - .5) * s * .15);
+        tc.stroke();
+      }
+      tc.globalAlpha = 1;
+      // paper speckle showing through
+      tc.fillStyle = 'rgba(240,234,214,0.16)';
+      for (let i = 0; i < s; i += 3){
+        if (Math.random() < .5) tc.fillRect(Math.random() * s, Math.random() * s, 1.5, 1.5);
+      }
+      // sketchy double outline
+      tc.strokeStyle = col.dark;
+      tc.lineWidth = Math.max(1.4, s * 0.07);
+      wobblyRect(tc, s*0.08, s*0.08, s*0.84, s*0.84, s*0.05, 0, c * 7 + v * 13);
+      tc.globalAlpha = 0.55;
+      tc.lineWidth = Math.max(1, s * 0.045);
+      wobblyRect(tc, s*0.05, s*0.05, s*0.9, s*0.9, s*0.07, 1, c * 3 + v * 5);
+      tc.globalAlpha = 1;
+      variants.push(t);
+    }
+    tiles.push({ c, variants });
+  }
+}
+
+/* ---------- static paper background ---------- */
+function drawPaper(){
+  const ctx = pctx;
+  ctx.clearRect(0, 0, W, H);
+  // base paper
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, '#ece4cd');
+  g.addColorStop(.5, '#e6ddc3');
+  g.addColorStop(1, '#ddd3b6');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  // fibers
+  ctx.strokeStyle = 'rgba(120,110,85,0.05)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 260; i++){
+    const x = Math.random() * W, y = Math.random() * H, a = Math.random() * Math.PI, l = 4 + Math.random() * 14;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+    ctx.stroke();
+  }
+  // mottled stains
+  for (let i = 0; i < 26; i++){
+    const x = Math.random() * W, y = Math.random() * H, r = 30 + Math.random() * 120;
+    const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const dark = Math.random() < .5;
+    rg.addColorStop(0, dark ? 'rgba(105,90,55,0.05)' : 'rgba(255,252,235,0.06)');
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+  // edge scuff
+  const eg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*.35, W/2, H/2, Math.max(W,H)*.75);
+  eg.addColorStop(0, 'rgba(0,0,0,0)');
+  eg.addColorStop(1, 'rgba(90,75,45,0.18)');
+  ctx.fillStyle = eg;
+  ctx.fillRect(0, 0, W, H);
+
+  const bX = bx, bY = by, bW = scale * COLS, bH = scale * ROWS;
+
+  // graph-paper grid inside board
+  ctx.strokeStyle = 'rgba(95,90,72,0.38)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 1; i < COLS; i++){
+    const x = bX + i * scale;
+    ctx.moveTo(x, bY); ctx.lineTo(x, bY + bH);
+  }
+  for (let i = 1; i < ROWS; i++){
+    const y = bY + i * scale;
+    ctx.moveTo(bX, y); ctx.lineTo(bX + bW, y);
+  }
+  ctx.stroke();
+
+  // board border — triple sketchy pass
+  ctx.strokeStyle = '#3d3a33';
+  ctx.lineWidth = Math.max(1.6, scale * 0.09);
+  ctx.lineJoin = 'round';
+  wobblyRect(ctx, bX, bY, bW, bH, scale * 0.06, 0, 11);
+  ctx.globalAlpha = .6;
+  ctx.lineWidth = Math.max(1.1, scale * 0.055);
+  wobblyRect(ctx, bX - 2, bY - 2, bW + 4, bH + 4, scale * 0.08, 1, 29);
+  ctx.globalAlpha = 1;
+
+  // right column: NEXT box (top, aligned with board top)
+  const ns = scale * 4;
+  const nx = W - Math.round(W * 0.30) + Math.round(W * 0.03);
+  const ny = by + 8;
+  ctx.strokeStyle = '#3d3a33';
+  ctx.lineWidth = Math.max(1.4, scale * 0.07);
+  wobblyRect(ctx, nx, ny, ns, ns, scale * 0.05, 0, 47);
+  ctx.globalAlpha = .5;
+  wobblyRect(ctx, nx - 2, ny - 2, ns + 4, ns + 4, scale * 0.07, 1, 61);
+  ctx.globalAlpha = 1;
+
+  // hand-drawn labels (values drawn on the dynamic layer)
+  const cx = nx + ns / 2;
+  const scoreLabelY = ny + ns + Math.round(scale * 0.95);
+  const scoreValY = scoreLabelY + Math.round(scale * 1.15);
+  const levelLabelY = scoreValY + Math.round(scale * 1.25);
+  const levelValY = levelLabelY + Math.round(scale * 1.15);
+  ctx.fillStyle = '#4a463c';
+  ctx.textAlign = 'center';
+  ctx.font = Math.max(13, Math.round(scale * 0.52)) + "px 'Patrick Hand', cursive";
+  ctx.fillText('N E X T', cx, ny - 10);
+  ctx.fillText('S C O R E', cx, scoreLabelY);
+  ctx.fillText('L E V E L', cx, levelLabelY);
+  window.__nextBox = { x: nx, y: ny, s: ns, cx, scoreValY, levelValY };
+}
+
+/* ---------- tetromino data (SRS) ---------- */
+const SHAPES = {
+  I: [[0,1],[1,1],[2,1],[3,1]],
+  O: [[1,0],[2,0],[1,1],[2,1]],
+  T: [[1,0],[0,1],[1,1],[2,1]],
+  S: [[1,0],[2,0],[0,1],[1,1]],
+  Z: [[0,0],[1,0],[1,1],[2,1]],
+  L: [[2,0],[0,1],[1,1],[2,1]],
+  J: [[0,0],[0,1],[1,1],[2,1]],
+};
+const COLORS = { I:1, O:2, T:3, S:4, Z:5, L:6, J:7 };
+const KICKS = {
+  '0>1': [[0,0],[-1,0],[1,0],[0,-1],[-1,-1],[1,-1],[0,1]],
+  '1>0': [[0,0],[1,0],[-1,0],[0,1],[1,1],[-1,1],[0,-1]],
+  '1>2': [[0,0],[1,0],[-1,0],[0,1],[1,1],[-1,1],[0,-1]],
+  '2>1': [[0,0],[-1,0],[1,0],[0,-1],[-1,-1],[1,-1],[0,1]],
+  '2>3': [[0,0],[1,0],[-1,0],[0,1],[1,1],[-1,1],[0,-1]],
+  '3>2': [[0,0],[-1,0],[1,0],[0,-1],[-1,-1],[1,-1],[0,1]],
+  '3>0': [[0,0],[-1,0],[1,0],[0,-1],[-1,-1],[1,-1],[0,1]],
+  '0>3': [[0,0],[1,0],[-1,0],[0,1],[1,1],[-1,1],[0,-1]],
+};
+function rotateCells(cells, dir){
+  return cells.map(([x, y]) => dir === 1 ? [3 - y, x] : [y, 3 - x]);
+}
+
+/* ---------- game state ---------- */
+let board, variants;               // board[r][c] = color idx or 0
+let cur = null, ghostY = 0;
+let renderX = 0, renderRot = 0;    // animated render state
+let nextType = null;
+let bag = [];
+let score = 0, lines = 0, level = 1;
+let state = 'start';               // start | play | clear | pause | over
+let dropTimer = 0, dropInterval = 1000;
+let lockTimer = 0, lockResets = 0, grounded = false;
+let clearRows = [], clearT = 0;
+let combo = 0;
+let scorePopups = [];
+let particles = [];
+let shakeT = 0, shakeMag = 0;
+let spinT = 0;                     // rotation squash anim
+let lastT = 0;
+
+function newBag(){
+  const t = ['I','O','T','S','Z','L','J'];
+  for (let i = t.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [t[i], t[j]] = [t[j], t[i]];
+  }
+  return t;
+}
+function nextTypeFromBag(){
+  if (!bag.length) bag = newBag();
+  return bag.pop();
+}
+function spawn(){
+  const type = nextType || (nextType = nextTypeFromBag());
+  nextType = nextTypeFromBag();
+  cur = {
+    type,
+    cells: SHAPES[type].slice(),
+    rot: 0,
+    x: type === 'O' ? 4 : 3,
+    y: type === 'I' ? -1 : 0,
+  };
+  if (type === 'I') cur.y = -1;
+  grounded = false;
+  lockTimer = 0;
+  lockResets = 0;
+  renderX = cur.x;
+  renderRot = 0;
+  if (collides(cur.cells, cur.x, cur.y)){
+    gameOver();
+    return;
+  }
+  updateGhost();
+  drawNext();
+}
+function collides(cells, ox, oy){
+  for (const [cx, cy] of cells){
+    const x = ox + cx, y = oy + cy;
+    if (x < 0 || x >= COLS || y >= ROWS) return true;
+    if (y >= 0 && board[y][x]) return true;
+  }
+  return false;
+}
+function updateGhost(){
+  ghostY = cur.y;
+  while (!collides(cur.cells, cur.x, ghostY + 1)) ghostY++;
+}
+function tryMove(dx, dy){
+  if (state !== 'play' || !cur) return false;
+  if (!collides(cur.cells, cur.x + dx, cur.y + dy)){
+    cur.x += dx; cur.y += dy;
+    if (dy > 0) { if (grounded) {} }
+    if (dy <= 0) resetLock();
+    updateGhost();
+    return true;
+  }
+  return false;
+}
+function resetLock(){
+  if (grounded && lockResets < 15){
+    lockTimer = 0;
+    lockResets++;
+  }
+}
+function tryRotate(dir){
+  if (state !== 'play' || !cur) return;
+  if (cur.type === 'O'){ sfx('rot'); return; }
+  const from = cur.rot, to = (cur.rot + dir + 4) % 4;
+  const rotated = rotateCells(cur.cells, dir);
+  const kicks = KICKS[from + '>' + to];
+  for (const [kx, ky] of kicks){
+    if (!collides(rotated, cur.x + kx, cur.y - ky)){
+      cur.cells = rotated;
+      cur.x += kx; cur.y -= ky;
+      cur.rot = to;
+      spinT = 1;
+      resetLock();
+      updateGhost();
+      sfx('rot');
+      return;
+    }
+  }
+}
+function softDrop(){
+  if (state !== 'play') return;
+  if (tryMove(0, 1)){
+    score += 1;
+    dropTimer = 0;
+    grounded = collides(cur.cells, cur.x, cur.y + 1);
+  }
+}
+function hardDrop(){
+  if (state !== 'play' || !cur) return;
+  let d = 0;
+  while (!collides(cur.cells, cur.x, cur.y + 1)){ cur.y++; d++; }
+  score += d * 2;
+  shake(d * 0.8, 3 + d * 0.15);
+  sfx('drop');
+  lockPiece();
+}
+function lockPiece(){
+  if (!cur) return;
+  for (const [cx, cy] of cur.cells){
+    const x = cur.x + cx, y = cur.y + cy;
+    if (y >= 0){
+      board[y][x] = COLORS[cur.type];
+      variants[y][x] = (x * 7 + y * 13 + Math.floor(Math.random() * 3)) % 3;
+    }
+  }
+  cur = null;
+  sfx('lock');
+  const rows = [];
+  for (let r = 0; r < ROWS; r++){
+    if (board[r].every(v => v)) rows.push(r);
+  }
+  if (rows.length){
+    state = 'clear';
+    clearT = 0;
+    clearRows = rows;
+    combo++;
+    const base = [0, 100, 300, 500, 800][rows.length];
+    const pts = base * level + (combo > 1 ? 50 * (combo - 1) * level : 0);
+    score += pts;
+    lines += rows.length;
+    const newLevel = Math.floor(lines / 10) + 1;
+    if (newLevel > level){
+      level = newLevel;
+      dropInterval = Math.max(90, 850 * Math.pow(0.85, level - 1));
+      sfx('level');
+      popup('LEVEL ' + String(level).padStart(2, '0'), bx + scale * COLS / 2, by + scale * 3, 1.3);
+    }
+    popup('+' + pts, bx + scale * COLS / 2, by + scale * (ROWS - rows.length) - scale, rows.length > 2 ? 1.2 : 1);
+    if (rows.length === 4){
+      shake(26, 9);
+      flash(0.5);
+      sfx('tetris');
+    } else {
+      shake(rows.length * 5, 2 + rows.length);
+      sfx('clear');
+    }
+    spawnDust(rows);
+  } else {
+    combo = 0;
+    spawn();
+  }
+  updateHud();
+}
+function finishClear(){
+  clearRows.sort((a, b) => a - b);
+  for (const r of clearRows){
+    for (let c = 0; c < COLS; c++){
+      for (let y = r; y > 0; y--){
+        board[y][c] = board[y - 1][c];
+        variants[y][c] = variants[y - 1][c];
+      }
+      board[0][c] = 0;
+      variants[0][c] = 0;
+    }
+  }
+  clearRows = [];
+  state = 'play';
+  dropTimer = 0;
+  spawn();
+}
+function gameOver(){
+  state = 'over';
+  cur = null;
+  sfx('over');
+  shake(30, 10);
+  flash(0.25);
+}
+function startGame(){
+  board = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+  variants = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+  score = 0; lines = 0; level = 1; combo = 0;
+  dropInterval = 850;
+  dropTimer = 0;
+  scorePopups = [];
+  particles = [];
+  bag = [];
+  nextType = null;
+  state = 'play';
+  updateHud();
+  spawn();
+  sfx('start');
+}
+function updateHud(){ /* score & level are drawn on the canvas in render() */ }
+function popup(text, x, y, size){
+  scorePopups.push({ text, x, y, t: 0, size: size || 1 });
+}
+function spawnDust(rows){
+  for (const r of rows){
+    for (let i = 0; i < 14; i++){
+      particles.push({
+        x: bx + Math.random() * scale * COLS,
+        y: by + (r + 0.5) * scale,
+        vx: (Math.random() - .5) * 160,
+        vy: -40 - Math.random() * 120,
+        life: 0.5 + Math.random() * 0.5,
+        t: 0,
+        s: 1.5 + Math.random() * 2.5,
+        col: Math.random() < .5 ? 'rgba(240,234,214,' : 'rgba(120,110,85,',
+      });
+    }
+  }
+}
+function shake(t, mag){
+  shakeT = Math.max(shakeT, t / 1000);
+  shakeMag = Math.max(shakeMag, mag);
+}
+function flash(a){
+  flashEl.style.transition = 'none';
+  flashEl.style.opacity = a;
+  requestAnimationFrame(() => {
+    flashEl.style.transition = 'opacity .45s ease-out';
+    flashEl.style.opacity = 0;
+  });
+}
+
+/* ---------- next preview (drawn on the dynamic layer) ---------- */
+function drawNext(){
+  const L = window.__nextBox;
+  if (!L || !nextType) return;
+  const s = scale;
+  const cells = SHAPES[nextType];
+  const minX = Math.min(...cells.map(p => p[0])), maxX = Math.max(...cells.map(p => p[0]));
+  const minY = Math.min(...cells.map(p => p[1])), maxY = Math.max(...cells.map(p => p[1]));
+  const offX = (4 - (maxX - minX + 1)) / 2 - minX;
+  const offY = (4 - (maxY - minY + 1)) / 2 - minY;
+  for (const [cx, cy] of cells){
+    const t = tiles[COLORS[nextType]].variants[(cx * 3 + cy * 5) % 3];
+    gctx.drawImage(t, Math.round(L.x + (offX + cx) * s), Math.round(L.y + (offY + cy) * s), s, s);
+  }
+}
+
+/* ============================================================
+   AUDIO — all synthesized (Web Audio)
+   ============================================================ */
+let AC = null, master = null, musicGain = null, musicOn = true, musicTimer = null, musicStep = 0;
+function initAudio(){
+  if (AC) return;
+  try {
+    AC = new (window.AudioContext || window.webkitAudioContext)();
+    master = AC.createGain();
+    master.gain.value = 0.8;
+    master.connect(AC.destination);
+    musicGain = AC.createGain();
+    musicGain.gain.value = musicOn ? 0.5 : 0;
+    musicGain.connect(master);
+  } catch (e) { AC = null; }
+}
+function env(g, t0, a, d, peak){
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(peak, t0 + a);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + a + d);
+}
+function tone(freq, dur, type, vol, slideTo, dest){
+  if (!AC) return;
+  const t0 = AC.currentTime;
+  const o = AC.createOscillator();
+  const g = AC.createGain();
+  o.type = type || 'square';
+  o.frequency.setValueAtTime(freq, t0);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
+  env(g, t0, 0.005, dur, vol || 0.2);
+  o.connect(g); g.connect(dest || master);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function noiseBurst(dur, vol, filterFreq, q){
+  if (!AC) return;
+  const t0 = AC.currentTime;
+  const len = Math.max(1, Math.floor(AC.sampleRate * dur));
+  const buf = AC.createBuffer(1, len, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = AC.createBufferSource();
+  src.buffer = buf;
+  const f = AC.createBiquadFilter();
+  f.type = 'lowpass'; f.frequency.value = filterFreq || 800; f.Q.value = q || 0.7;
+  const g = AC.createGain();
+  env(g, t0, 0.004, dur, vol || 0.3);
+  src.connect(f); f.connect(g); g.connect(master);
+  src.start(t0);
+}
+function sfx(name){
+  if (!AC) return;
+  switch (name){
+    case 'move':  tone(210, 0.03, 'square', 0.05); break;
+    case 'rot':   tone(330, 0.05, 'square', 0.08, 440); break;
+    case 'drop':  tone(150, 0.12, 'sine', 0.35, 55); noiseBurst(0.08, 0.15, 500); break;
+    case 'lock':  tone(120, 0.05, 'triangle', 0.2); noiseBurst(0.03, 0.08, 1200); break;
+    case 'clear':
+      [523, 659, 784].forEach((f, i) => setTimeout(() => tone(f, 0.09, 'square', 0.14), i * 55));
+      break;
+    case 'tetris':
+      [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => tone(f, 0.12, 'square', 0.16), i * 60));
+      noiseBurst(0.25, 0.12, 3000, 2);
+      break;
+    case 'level':
+      [392, 523, 659, 784].forEach((f, i) => setTimeout(() => tone(f, 0.1, 'triangle', 0.2), i * 70));
+      break;
+    case 'over':
+      [392, 330, 262, 196, 131].forEach((f, i) => setTimeout(() => tone(f, 0.22, 'sawtooth', 0.14), i * 130));
+      break;
+    case 'start':
+      [262, 392, 523].forEach((f, i) => setTimeout(() => tone(f, 0.08, 'square', 0.12), i * 60));
+      break;
+    case 'pause': tone(440, 0.06, 'square', 0.1, 330); break;
+  }
+}
+
+/* --- chiptune loop (original, not a known theme) --- */
+const MELODY = [
+  392,0,523,0, 659,0,523,0, 440,0,587,0, 494,0,440,0,
+  392,0,523,0, 659,0,784,0, 659,0,587,0, 494,0,0,0,
+  330,0,440,0, 523,0,440,0, 392,0,494,0, 440,0,392,0,
+  330,0,392,0, 494,0,587,0, 523,0,440,0, 392,0,0,0,
+];
+const BASS = [
+  98,0,0,0, 98,0,0,0, 110,0,0,0, 110,0,0,0,
+  98,0,0,0, 98,0,0,0, 110,0,0,0, 110,0,0,0,
+  82,0,0,0, 82,0,0,0, 98,0,0,0, 98,0,0,0,
+  82,0,0,0, 82,0,0,0, 98,0,0,0, 110,0,0,0,
+];
+const STEP_MS = 140;
+function scheduleMusic(){
+  if (!AC || !musicOn) return;
+  const step = musicStep % MELODY.length;
+  const t0 = AC.currentTime + 0.03;
+  const m = MELODY[step];
+  if (m){
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'square';
+    o.frequency.value = m;
+    env(g, t0, 0.004, STEP_MS / 1000 * 0.9, 0.11);
+    o.connect(g); g.connect(musicGain);
+    o.start(t0); o.stop(t0 + 0.3);
+  }
+  const b = BASS[step];
+  if (b){
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'triangle';
+    o.frequency.value = b;
+    env(g, t0, 0.005, STEP_MS / 1000 * 0.95, 0.22);
+    o.connect(g); g.connect(musicGain);
+    o.start(t0); o.stop(t0 + 0.3);
+  }
+  if (step % 2 === 0){
+    // hi-hat tick
+    const len = Math.floor(AC.sampleRate * 0.03);
+    const buf = AC.createBuffer(1, len, AC.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = AC.createBufferSource(); src.buffer = buf;
+    const f = AC.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 6000;
+    const g = AC.createGain();
+    env(g, t0, 0.002, 0.03, step % 8 === 4 ? 0.08 : 0.04);
+    src.connect(f); f.connect(g); g.connect(musicGain);
+    src.start(t0);
+  }
+  musicStep++;
+}
+function startMusic(){
+  if (!AC || musicTimer) return;
+  musicStep = 0;
+  musicTimer = setInterval(scheduleMusic, STEP_MS);
+}
+function stopMusic(){
+  if (musicTimer){ clearInterval(musicTimer); musicTimer = null; }
+}
+function toggleMusic(){
+  musicOn = !musicOn;
+  musicBtn.classList.toggle('on', musicOn);
+  if (AC) musicGain.gain.setTargetAtTime(musicOn ? 0.5 : 0, AC.currentTime, 0.05);
+  if (musicOn && (state === 'play' || state === 'clear')) startMusic();
+  else stopMusic();
+}
+musicBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  initAudio();
+  if (AC && AC.state === 'suspended') AC.resume();
+  toggleMusic();
+});
+
+/* ============================================================
+   ROLLING FILM GRAIN
+   ============================================================ */
+let grainCanvas = mkCanvas(1, 1);
+let grainData = null;
+let grainSeed = 0;
+function ensureGrain(){
+  const gw = Math.max(96, Math.ceil(W / 1.4)), gh = Math.max(96, Math.ceil(H / 1.4));
+  if (grainCanvas.width !== gw || grainCanvas.height !== gh){
+    grainCanvas = mkCanvas(gw, gh);
+    grainData = grctx.createImageData(gw, gh);
+  }
+}
+function renderGrain(t){
+  ensureGrain();
+  const gw = grainCanvas.width, gh = grainCanvas.height;
+  const d = grainData.data;
+  grainSeed = (grainSeed + 7) % 100000;
+  // fast LCG for speed — noise centered on mid-gray so the
+  // overlay blend reads as fine film grain, not mottling
+  let s = grainSeed;
+  for (let i = 0; i < d.length; i += 4){
+    s = (s * 1664525 + 1013904223) >>> 0;
+    const v = 112 + ((s & 255) >> 1);          // 112..239
+    const v2 = 112 + (((s >> 8) & 255) >> 1);
+    const v3 = 112 + (((s >> 16) & 255) >> 1);
+    d[i]     = v;
+    d[i + 1] = v2;
+    d[i + 2] = v3;
+    d[i + 3] = 255;
+  }
+  const gc = grainCanvas.getContext('2d');
+  gc.putImageData(grainData, 0, 0);
+
+  grctx.clearRect(0, 0, grainC.width, grainC.height);
+  // rolling: vertical drift + wrap, like running film
+  const drift = (t * 0.05) % gh;
+  const jx = Math.round(Math.sin(t * 0.0031) * 8);
+  grctx.imageSmoothingEnabled = false;
+  grctx.drawImage(grainCanvas, jx, drift, gw, gh, 0, 0, W, H);
+  grctx.drawImage(grainCanvas, jx, drift - gh, gw, gh, 0, 0, W, H);
+
+  // film scratches (occasional vertical white lines)
+  if (Math.random() < 0.06){
+    const x = Math.random() * W;
+    grctx.strokeStyle = 'rgba(255,250,235,' + (0.05 + Math.random() * 0.1) + ')';
+    grctx.lineWidth = 1;
+    grctx.beginPath();
+    grctx.moveTo(x, 0);
+    grctx.lineTo(x + (Math.random() - .5) * 20, H);
+    grctx.stroke();
+  }
+  // dust specks
+  if (Math.random() < 0.25){
+    for (let i = 0; i < 3; i++){
+      grctx.fillStyle = 'rgba(255,250,235,' + (0.06 + Math.random() * 0.12) + ')';
+      grctx.beginPath();
+      grctx.arc(Math.random() * W, Math.random() * H, 0.5 + Math.random() * 1.5, 0, 7);
+      grctx.fill();
+    }
+  }
+  // film flicker (subtle global brightness wobble)
+  const flick = Math.sin(t * 0.021) * 0.5 + Math.sin(t * 0.0053 + 2) * 0.5;
+  grctx.globalCompositeOperation = 'multiply';
+  grctx.fillStyle = 'rgba(' + Math.round(245 + flick * 6) + ',243,238,1)';
+  grctx.fillRect(0, 0, grainC.width, grainC.height);
+  grctx.globalCompositeOperation = 'source-over';
+}
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function drawCell(ctx, x, y, colorIdx, variant, alpha){
+  const t = tiles[colorIdx].variants[variant % 3];
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(t, Math.round(x), Math.round(y), cell, cell);
+  ctx.globalAlpha = 1;
+}
+function render(t){
+  gctx.clearRect(0, 0, W, H);
+  gctx.save();
+  // screen shake
+  if (shakeT > 0){
+    const m = shakeMag * Math.min(1, shakeT * 3);
+    gctx.translate((Math.random() - .5) * m, (Math.random() - .5) * m);
+  }
+
+  // right column: next piece + score/level values
+  drawNext();
+  const L = window.__nextBox;
+  if (L){
+    gctx.textAlign = 'center';
+    gctx.fillStyle = '#37342c';
+    gctx.font = '700 ' + Math.round(scale * 1.1) + "px Caveat, cursive";
+    gctx.fillText(String(score), L.cx, L.scoreValY);
+    gctx.fillText(String(level).padStart(2, '0'), L.cx, L.levelValY);
+  }
+
+  // falling settled board (shift during clear anim)
+  const shift = state === 'clear' ? Math.min(1, clearT / 0.28) : 0;
+  for (let r = 0; r < ROWS; r++){
+    for (let c = 0; c < COLS; c++){
+      const v = board[r][c];
+      if (!v) continue;
+      const inClear = clearRows.includes(r);
+      const yOff = inClear ? 0 : shift * scale * clearRows.length;
+      if (inClear){
+        // flash & crumble
+        const p = clearT / 0.45;
+        const a = p < 0.5 ? 1 : 1 - (p - 0.5) * 2;
+        const jitter = p > 0.5 ? (Math.random() - .5) * p * 8 : 0;
+        drawCell(gctx, bx + c * scale + jitter, by + r * scale + jitter, v, variants[r][c], Math.max(0, a));
+        if (p < 0.4){
+          gctx.globalAlpha = (0.4 - p) * 1.4;
+          gctx.fillStyle = '#fffef2';
+          gctx.fillRect(bx + c * scale, by + r * scale, scale, scale);
+          gctx.globalAlpha = 1;
+        }
+      } else {
+        drawCell(gctx, bx + c * scale, by + r * scale + yOff, v, variants[r][c], 1);
+      }
+    }
+  }
+
+  // ghost + current piece (animated)
+  if (cur && (state === 'play' || state === 'pause')){
+    renderX += (cur.x - renderX) * 0.55;
+    if (Math.abs(cur.x - renderX) < 0.01) renderX = cur.x;
+    const px = bx + renderX * scale;
+    const py = by + cur.y * scale;
+    // ghost
+    if (ghostY > cur.y){
+      gctx.globalAlpha = 0.3;
+      gctx.strokeStyle = PALETTE[COLORS[cur.type]].dark;
+      gctx.lineWidth = 1.5;
+      gctx.setLineDash([4, 3]);
+      for (const [cx, cy] of cur.cells){
+        gctx.strokeRect(px + cx * scale + 2, by + ghostY * scale + cy * scale + 2, scale - 4, scale - 4);
+      }
+      gctx.setLineDash([]);
+      gctx.globalAlpha = 1;
+    }
+    // rotation squash
+    let sx = 1, sy = 1;
+    if (spinT > 0){
+      const k = Math.sin(spinT * Math.PI);
+      sx = 1 - 0.18 * k;
+      sy = 1 + 0.18 * k;
+    }
+    for (const [cx, cy] of cur.cells){
+      const cxp = px + (cx + 0.5) * scale;
+      const cyp = py + (cy + 0.5) * scale;
+      gctx.save();
+      gctx.translate(cxp, cyp);
+      gctx.scale(sx, sy);
+      drawCell(gctx, -scale / 2, -scale / 2, COLORS[cur.type], (cx * 3 + cy * 5) % 3, 1);
+      gctx.restore();
+    }
+  }
+
+  // particles
+  for (const p of particles){
+    gctx.fillStyle = p.col + (Math.max(0, 1 - p.t / p.life) * 0.8) + ')';
+    gctx.fillRect(p.x, p.y, p.s, p.s);
+  }
+
+  // score popups
+  for (const p of scorePopups){
+    const a = Math.max(0, 1 - p.t / 1.1);
+    gctx.globalAlpha = a;
+    gctx.fillStyle = '#37342c';
+    gctx.font = '700 ' + Math.round(scale * 1.1 * p.size) + "px Caveat, cursive";
+    gctx.textAlign = 'center';
+    gctx.fillText(p.text, p.x, p.y - p.t * 30);
+    gctx.globalAlpha = 1;
+  }
+
+  // overlays
+  if (state === 'start' || state === 'over' || state === 'pause'){
+    gctx.fillStyle = 'rgba(236,228,205,0.72)';
+    gctx.fillRect(bx, by, scale * COLS, scale * ROWS);
+    gctx.textAlign = 'center';
+    const cxp = bx + scale * COLS / 2;
+    const cyp = by + scale * ROWS / 2;
+    if (state === 'start'){
+      gctx.fillStyle = '#37342c';
+      gctx.font = '700 ' + Math.round(scale * 1.6) + "px Caveat, cursive";
+      gctx.fillText('T E T R I S', cxp, cyp - scale * 2.2);
+      gctx.font = Math.round(scale * 0.85) + "px 'Patrick Hand', cursive";
+      gctx.fillText('press any key or tap to start', cxp, cyp - scale * 0.6);
+      // key hints as a footnote across the bottom margin
+      gctx.font = Math.min(scale * 0.55, Math.floor(W / 105)) + "px 'Patrick Hand', cursive";
+      gctx.fillStyle = '#6a6455';
+      gctx.fillText('← → move    ↓ soft drop    SPACE hard drop    ↑ X rotate    Z counter-rotate    P pause    M music', W / 2, H - 16);
+    } else if (state === 'over'){
+      gctx.fillStyle = '#7a2f1d';
+      gctx.font = '700 ' + Math.round(scale * 1.5) + "px Caveat, cursive";
+      gctx.fillText('G A M E   O V E R', cxp, cyp - scale * 1.2);
+      gctx.fillStyle = '#37342c';
+      gctx.font = Math.round(scale * 0.9) + "px 'Patrick Hand', cursive";
+      gctx.fillText('score  ' + score, cxp, cyp);
+      gctx.font = Math.round(scale * 0.75) + "px 'Patrick Hand', cursive";
+      gctx.fillStyle = '#5a5548';
+      gctx.fillText('press any key to play again', cxp, cyp + scale * 1.3);
+    } else {
+      gctx.fillStyle = '#37342c';
+      gctx.font = '700 ' + Math.round(scale * 1.3) + "px Caveat, cursive";
+      gctx.fillText('P A U S E D', cxp, cyp);
+      gctx.font = Math.round(scale * 0.75) + "px 'Patrick Hand', cursive";
+      gctx.fillStyle = '#5a5548';
+      gctx.fillText('press P to resume', cxp, cyp + scale * 1.1);
+    }
+  }
+
+  gctx.restore();
+}
+
+/* ============================================================
+   UPDATE LOOP
+   ============================================================ */
+function update(dt, t){
+  // decay
+  if (shakeT > 0) shakeT = Math.max(0, shakeT - dt);
+  if (spinT > 0) spinT = Math.max(0, spinT - dt * 6);
+  for (const p of particles){
+    p.t += dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 300 * dt;
+  }
+  particles = particles.filter(p => p.t < p.life);
+  for (const p of scorePopups) p.t += dt;
+  scorePopups = scorePopups.filter(p => p.t < 1.1);
+
+  if (state === 'clear'){
+    clearT += dt;
+    if (clearT >= 0.45) finishClear();
+    return;
+  }
+  if (state !== 'play' || !cur) return;
+
+  // lock delay + gravity
+  const onGround = collides(cur.cells, cur.x, cur.y + 1);
+  if (onGround){
+    if (!grounded){ grounded = true; lockTimer = 0; }
+    lockTimer += dt * 1000;
+    if (lockTimer >= 500){
+      lockPiece();
+      return;
+    }
+  } else {
+    grounded = false;
+    lockTimer = 0;
+  }
+  dropTimer += dt * 1000;
+  if (dropTimer >= dropInterval){
+    dropTimer = 0;
+    if (!tryMove(0, 1)){
+      // piece can't fall; handled by lock delay above
+    }
+  }
+}
+
+function frame(t){
+  const dt = Math.min(0.05, (t - lastT) / 1000 || 0.016);
+  lastT = t;
+  update(dt, t);
+  render(t);
+  renderGrain(t);
+  requestAnimationFrame(frame);
+}
+
+/* ============================================================
+   INPUT
+   ============================================================ */
+let lastMoveT = 0;
+function handleKeyAction(a, isRepeat){
+  if (state === 'start' || state === 'over'){
+    if (a !== 'music') startGame();
+    return;
+  }
+  if (state === 'pause'){
+    if (a === 'pause') resumeGame();
+    return;
+  }
+  switch (a){
+    case 'left':
+      if (tryMove(-1, 0)){
+        const now = performance.now();
+        if (now - lastMoveT > 120) sfx('move');
+        lastMoveT = now;
+      }
+      break;
+    case 'right':
+      if (tryMove(1, 0)){
+        const now = performance.now();
+        if (now - lastMoveT > 120) sfx('move');
+        lastMoveT = now;
+      }
+      break;
+    case 'down': softDrop(); break;
+    case 'rot': tryRotate(1); break;
+    case 'rotr': tryRotate(-1); break;
+    case 'drop': hardDrop(); break;
+    case 'pause':
+      if (state === 'play'){ state = 'pause'; sfx('pause'); stopMusic(); }
+      break;
+  }
+}
+function resumeGame(){
+  state = 'play';
+  sfx('pause');
+  if (musicOn) startMusic();
+}
+window.addEventListener('keydown', (e) => {
+  initAudio();
+  if (AC && AC.state === 'suspended') AC.resume();
+  let a = null;
+  switch (e.code){
+    case 'ArrowLeft': case 'KeyA': a = 'left'; break;
+    case 'ArrowRight': case 'KeyD': a = 'right'; break;
+    case 'ArrowDown': case 'KeyS': a = 'down'; break;
+    case 'ArrowUp': case 'KeyW': case 'KeyX': a = 'rot'; break;
+    case 'KeyZ': a = 'rotr'; break;
+    case 'Space': a = 'drop'; break;
+    case 'KeyP': case 'Escape': a = 'pause'; break;
+    case 'KeyM': a = 'music'; break;
+    default: return;
+  }
+  e.preventDefault();
+  if (a === 'music'){ toggleMusic(); return; }
+  if (e.repeat && (a === 'rot' || a === 'rotr' || a === 'drop' || a === 'pause')) return;
+  handleKeyAction(a, e.repeat);
+});
+window.addEventListener('pointerdown', () => {
+  initAudio();
+  if (AC && AC.state === 'suspended') AC.resume();
+  if (state === 'start' || state === 'over') startGame();
+});
+document.getElementById('touch').addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  e.preventDefault();
+  initAudio();
+  if (AC && AC.state === 'suspended') AC.resume();
+  const a = b.dataset.a;
+  handleKeyAction(a === 'rot' ? 'rot' : a === 'drop' ? 'drop' : a, false);
+});
+// music only auto-starts once audio is unlocked
+window.addEventListener('keydown', () => {
+  if (musicOn && AC && (state === 'play' || state === 'clear') && !musicTimer) startMusic();
+}, { once: false });
+
+/* ---------- boot ---------- */
+resize();
+board = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+variants = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+bag = [];
+nextType = nextTypeFromBag();   // show the first piece on the start screen
+requestAnimationFrame(frame);
+// redraw the paper once the handwriting fonts finish loading
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => drawPaper());
+</script>
+</body>
+</html>

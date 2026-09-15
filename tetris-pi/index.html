@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Retro Tetris — Paper &amp; Grain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Architects+Daughter&display=swap" rel="stylesheet">
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #b9b2a0;
+    font-family: 'Caveat', 'Architects Daughter', cursive;
+    user-select: none;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  canvas { display: block; }
+  #hint {
+    position: fixed; bottom: 10px; left: 0; right: 0;
+    text-align: center; color: #55503f; opacity: .85;
+    font-size: 20px; letter-spacing: .5px; pointer-events: none;
+    text-shadow: 0 1px 0 rgba(255,255,255,.35);
+  }
+  #musicBtn {
+    position: fixed; top: 14px; right: 16px;
+    font-family: inherit; font-size: 22px;
+    background: rgba(240,235,220,.55); color: #4a4536;
+    border: 2px solid #4a4536; border-radius: 10px;
+    padding: 4px 14px; cursor: pointer;
+    box-shadow: 2px 2px 0 rgba(74,69,54,.35);
+  }
+  #musicBtn:hover { background: rgba(240,235,220,.85); }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="game"></canvas></div>
+<button id="musicBtn">♪ music: off</button>
+<div id="hint">← → move &nbsp;·&nbsp; ↑ rotate &nbsp;·&nbsp; ↓ soft drop &nbsp;·&nbsp; space hard drop &nbsp;·&nbsp; P pause &nbsp;·&nbsp; M music &nbsp;·&nbsp; R restart</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ============================================================
+   RETRO TETRIS — aged paper, pencil grid, crayon blocks,
+   rolling film grain, chiptune sound & optional music.
+   ============================================================ */
+
+const COLS = 10, ROWS = 20;
+
+// Crayon palette lifted from the reference drawing
+const PALETTE = {
+  I: { base: '#4e7fb5', dark: '#33567e', light: '#7fa8d4' }, // blue
+  O: { base: '#c9a227', dark: '#8f7114', light: '#e3c65a' }, // yellow
+  T: { base: '#7a5ca8', dark: '#543f78', light: '#9c82c4' }, // purple
+  S: { base: '#5d9c45', dark: '#3c6c2a', light: '#86bd6c' }, // green
+  Z: { base: '#c14b32', dark: '#8c2f1c', light: '#dd7455' }, // red
+  J: { base: '#3f6fb0', dark: '#2a4d80', light: '#6b93cf' }, // deep blue
+  L: { base: '#d98e2b', dark: '#a06114', light: '#ecb15e' }, // orange
+  C: { base: '#4a9aa8', dark: '#2f6b76', light: '#74c0cc' }  // teal
+};
+
+const SHAPES = {
+  I: [[0,1],[1,1],[2,1],[3,1]],
+  O: [[1,0],[2,0],[1,1],[2,1]],
+  T: [[1,0],[0,1],[1,1],[2,1]],
+  S: [[1,0],[2,0],[0,1],[1,1]],
+  Z: [[0,0],[1,0],[1,1],[2,1]],
+  J: [[0,0],[0,1],[1,1],[2,1]],
+  L: [[2,0],[0,1],[1,1],[2,1]]
+};
+
+// ---------------------------------------------------------------
+// Seeded RNG (mulberry32) so crayon scribbles are stable per cell
+// ---------------------------------------------------------------
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ---------------------------------------------------------------
+// Canvas & layout
+// ---------------------------------------------------------------
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+
+// layout metrics (recomputed on resize)
+let CELL = 30, boardX = 0, boardY = 0, boardW = 0, boardH = 0;
+let nextX = 0, nextY = 0, nextSize = 0;
+let scoreY = 0, levelY = 0, sideX = 0;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  CELL = Math.floor(Math.min((H - 90) / (ROWS + 2.4), (W * 0.56) / (COLS + 4)));
+  CELL = Math.max(16, Math.min(CELL, 46));
+  boardW = CELL * COLS; boardH = CELL * ROWS;
+  boardX = Math.floor(W * 0.34 - boardW / 2);
+  boardY = Math.floor((H - boardH) / 2 - 14);
+  sideX = boardX + boardW + Math.max(34, CELL * 1.2);
+  nextSize = CELL * 4.6;
+  nextX = sideX;
+  nextY = boardY + 30;
+  scoreY = nextY + nextSize + 60;
+  levelY = scoreY + 96;
+
+  buildPaper();
+  buildGridTexture();
+}
+window.addEventListener('resize', resize);
+
+// ---------------------------------------------------------------
+// Paper background (pre-rendered): aged cream, stains, faint
+// graph lines, deckled darkening at the edges
+// ---------------------------------------------------------------
+let paperCv = null;
+function buildPaper() {
+  paperCv = document.createElement('canvas');
+  paperCv.width = W; paperCv.height = H;
+  const p = paperCv.getContext('2d');
+  const rnd = mulberry32(1234);
+
+  // base wash with soft blotches
+  p.fillStyle = '#d9d2bc';
+  p.fillRect(0, 0, W, H);
+  for (let i = 0; i < 220; i++) {
+    const x = rnd() * W, y = rnd() * H, r = 30 + rnd() * 160;
+    const g = p.createRadialGradient(x, y, 0, x, y, r);
+    const tone = rnd() > 0.5 ? 'rgba(190,180,150,' : 'rgba(235,228,205,';
+    g.addColorStop(0, tone + (0.05 + rnd() * 0.08) + ')');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    p.fillStyle = g;
+    p.beginPath(); p.arc(x, y, r, 0, 7); p.fill();
+  }
+
+  // faint graph-paper lines
+  p.strokeStyle = 'rgba(120,125,110,0.16)';
+  p.lineWidth = 1;
+  const gs = 26;
+  for (let x = (W % gs) / 2; x < W; x += gs) {
+    p.beginPath(); p.moveTo(x, 0); p.lineTo(x, H); p.stroke();
+  }
+  for (let y = (H % gs) / 2; y < H; y += gs) {
+    p.beginPath(); p.moveTo(0, y); p.lineTo(W, y); p.stroke();
+  }
+
+  // speckles & tiny dirt flecks
+  for (let i = 0; i < 900; i++) {
+    const x = rnd() * W, y = rnd() * H;
+    const a = 0.04 + rnd() * 0.16;
+    p.fillStyle = rnd() > 0.75 ? `rgba(90,80,55,${a})` : `rgba(255,250,235,${a})`;
+    const s = rnd() < 0.85 ? 1 : 2;
+    p.fillRect(x, y, s, s);
+  }
+  // a few coffee-ish scuffs in corners
+  for (let i = 0; i < 5; i++) {
+    const x = rnd() * W, y = rnd() * H, r = 40 + rnd() * 90;
+    const g = p.createRadialGradient(x, y, r * 0.4, x, y, r);
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, `rgba(105,90,60,${0.05 + rnd() * 0.06})`);
+    p.fillStyle = g;
+    p.beginPath(); p.arc(x, y, r, 0, 7); p.fill();
+  }
+
+  // vignette — darker, aged edges
+  const v = p.createRadialGradient(W/2, H/2, Math.min(W,H) * 0.35, W/2, H/2, Math.max(W,H) * 0.75);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(60,50,30,0.26)');
+  p.fillStyle = v;
+  p.fillRect(0, 0, W, H);
+}
+
+// ---------------------------------------------------------------
+// Board grid texture (pre-rendered pencil lines, slightly wobbly)
+// ---------------------------------------------------------------
+let gridCv = null;
+function buildGridTexture() {
+  gridCv = document.createElement('canvas');
+  gridCv.width = boardW + 24; gridCv.height = boardH + 24;
+  const g = gridCv.getContext('2d');
+  const rnd = mulberry32(99);
+  g.strokeStyle = 'rgba(60,55,45,0.55)';
+  g.lineWidth = 1.4;
+  g.lineCap = 'round';
+
+  const wob = (x1, y1, x2, y2) => {
+    const segs = 6;
+    g.beginPath();
+    g.moveTo(x1 + (rnd()-0.5), y1 + (rnd()-0.5));
+    for (let i = 1; i <= segs; i++) {
+      const t = i / segs;
+      g.lineTo(x1 + (x2-x1)*t + (rnd()-0.5)*1.3, y1 + (y2-y1)*t + (rnd()-0.5)*1.3);
+    }
+    g.stroke();
+  };
+
+  for (let c = 0; c <= COLS; c++) wob(12 + c*CELL, 12, 12 + c*CELL, 12 + boardH);
+  for (let r = 0; r <= ROWS; r++) wob(12, 12 + r*CELL, 12 + boardW, 12 + r*CELL);
+  // double stroke outer frame, heavier pencil
+  g.strokeStyle = 'rgba(50,45,36,0.9)';
+  g.lineWidth = 2.2;
+  wob(12, 12, 12 + boardW, 12);
+  wob(12, 12, 12, 12 + boardH);
+  wob(12 + boardW, 12, 12 + boxW(), 12 + boardH);
+  wob(12, 12 + boardH, 12 + boardW, 12 + boardH);
+  function boxW() { return 12 + boardW; }
+}
+
+// ---------------------------------------------------------------
+// Crayon cell drawing (pre-rendered per color, stable scribbles)
+// ---------------------------------------------------------------
+const cellSprites = {};
+function buildCellSprites() {
+  for (const key of Object.keys(PALETTE)) {
+    const col = PALETTE[key];
+    const cv = document.createElement('canvas');
+    cv.width = CELL; cv.height = CELL;
+    const c = cv.getContext('2d');
+    const rnd = mulberry32(key.charCodeAt(0) * 7919 + 42);
+    const m = 1.5; // margin so blocks look hand-drawn, slightly inset
+
+    // base fill — irregular rounded rect
+    c.fillStyle = col.base;
+    roundedPath(c, m, m, CELL - 2*m, CELL - 2*m, 3 + rnd()*2);
+    c.fill();
+
+    // crayon scribble strokes (light + dark diagonal hatching)
+    c.save();
+    roundedPath(c, m, m, CELL - 2*m, CELL - 2*m, 4);
+    c.clip();
+    for (let i = 0; i < 16; i++) {
+      const light = rnd() > 0.45;
+      c.strokeStyle = light ? col.light : col.dark;
+      c.globalAlpha = 0.25 + rnd() * 0.35;
+      c.lineWidth = 1 + rnd() * 1.6;
+      const x0 = rnd() * CELL, y0 = rnd() * CELL;
+      const len = 4 + rnd() * (CELL * 0.8);
+      const ang = (0.7 + rnd() * 0.5) + (rnd() > 0.5 ? 0 : Math.PI);
+      c.beginPath();
+      c.moveTo(x0, y0);
+      c.quadraticCurveTo(
+        x0 + Math.cos(ang) * len * 0.5 + (rnd()-0.5)*3,
+        y0 + Math.sin(ang) * len * 0.5 + (rnd()-0.5)*3,
+        x0 + Math.cos(ang) * len,
+        y0 + Math.sin(ang) * len
+      );
+      c.stroke();
+    }
+    // waxy speckle
+    for (let i = 0; i < 22; i++) {
+      c.globalAlpha = 0.08 + rnd() * 0.12;
+      c.fillStyle = rnd() > 0.5 ? col.light : col.dark;
+      c.fillRect(rnd() * CELL, rnd() * CELL, 1.5, 1.5);
+    }
+    c.restore();
+
+    // pencil outline
+    c.globalAlpha = 0.85;
+    c.strokeStyle = 'rgba(45,40,32,0.8)';
+    c.lineWidth = 1.2;
+    roundedPath(c, m, m, CELL - 2*m, CELL - 2*m, 3 + rnd()*2);
+    c.stroke();
+    c.globalAlpha = 1;
+
+    cellSprites[key] = cv;
+  }
+}
+function roundedPath(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+// ---------------------------------------------------------------
+// Film grain — rolling noise, dust, occasional scratch + flicker
+// ---------------------------------------------------------------
+const GRAIN_TILES = [];
+function buildGrain() {
+  const size = 256;
+  for (let t = 0; t < 3; t++) {
+    const cv = document.createElement('canvas');
+    cv.width = size; cv.height = size;
+    const c = cv.getContext('2d');
+    const img = c.createImageData(size, size);
+    const rnd = mulberry32(777 + t * 31);
+    for (let i = 0; i < size * size; i++) {
+      const v = rnd() * 255 | 0;
+      img.data[i*4] = v; img.data[i*4+1] = v; img.data[i*4+2] = v;
+      img.data[i*4+3] = 26 + (rnd() * 30 | 0);
+    }
+    c.putImageData(img, 0, 0);
+    GRAIN_TILES.push(cv);
+  }
+}
+let grainPhase = 0;
+function drawGrain(t) {
+  grainPhase += 1;
+  const tile = GRAIN_TILES[(grainPhase * 2) % GRAIN_TILES.length];
+  // rolling: offset changes every frame (fast jitter = rolling film)
+  const ox = (Math.random() * 256) | 0;
+  const oy = (Math.random() * 256) | 0;
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.globalCompositeOperation = 'overlay';
+  for (let x = -ox; x < W; x += 256)
+    for (let y = -oy; y < H; y += 256)
+      ctx.drawImage(tile, x, y);
+  ctx.restore();
+
+  // film flicker — very subtle brightness pulse
+  const flick = Math.sin(t * 0.011) * 0.5 + Math.sin(t * 0.037 + 2) * 0.5;
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = `rgba(255,255,255,${0.985 + flick * 0.012})`;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+
+  // occasional vertical scratch
+  if (Math.random() < 0.006) {
+    ctx.save();
+    ctx.globalAlpha = 0.10 + Math.random() * 0.12;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    const sx = Math.random() * W;
+    ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx + (Math.random()-0.5)*10, H); ctx.stroke();
+    ctx.restore();
+  }
+  // dust motes
+  for (let i = 0; i < 2; i++) {
+    if (Math.random() < 0.3) {
+      ctx.save();
+      ctx.globalAlpha = 0.05 + Math.random() * 0.08;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(Math.random() * W, Math.random() * H, 0.5 + Math.random() * 1.4, 0, 7);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
+// ---------------------------------------------------------------
+// Game state
+// ---------------------------------------------------------------
+let grid, piece, nextPiece, bag = [];
+let score = 0, level = 1, lines = 0;
+let state = 'ready'; // ready | playing | clearing | paused | over
+let gravityMs = 800, gravTimer = 0, dropFrac = 0;
+let clearingRows = [], clearT = 0;
+let shakeT = 0, shakeMag = 0;
+let flashT = 0;
+let comboPopups = [];
+let lastTime = 0;
+
+function newBag() {
+  const keys = Object.keys(SHAPES);
+  for (let i = keys.length - 1; i > 0; i--) {
+    const j = Math.random() * (i + 1) | 0;
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+  }
+  return keys;
+}
+function nextKey() {
+  if (bag.length === 0) bag = newBag();
+  return bag.pop();
+}
+function spawnPiece(key) {
+  const cells = SHAPES[key].map(c => c.slice());
+  return {
+    key, cells,
+    x: 3, y: -1,
+    // smooth transform state
+    animFrom: null, animT: 1
+  };
+}
+function collides(cells, ox, oy) {
+  for (const [cx, cy] of cells) {
+    const x = ox + cx, y = oy + cy;
+    if (x < 0 || x >= COLS || y >= ROWS) return true;
+    if (y >= 0 && grid[y][x]) return true;
+  }
+  return false;
+}
+function rotateCells(cells) {
+  // rotate around piece bounding-box center (SRS-lite, no wall kicks needed for this retro feel — but add simple kicks)
+  const xs = cells.map(c => c[0]), ys = cells.map(c => c[1]);
+  const mx = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const my = (Math.min(...ys) + Math.max(...ys)) / 2;
+  return cells.map(([x, y]) => [
+    Math.round(-(y - my) + mx),
+    Math.round((x - mx) + my)
+  ]);
+}
+function tryRotate() {
+  const rot = rotateCells(piece.cells);
+  const kicks = [0, -1, 1, -2, 2];
+  for (const k of kicks) {
+    if (!collides(rot, piece.x + k, piece.y)) {
+      piece.animFrom = piece.cells.map(c => [c[0] + piece.x, c[1] + piece.y]);
+      piece.cells = rot; piece.x += k;
+      piece.animT = 0;
+      sfxRotate();
+      return;
+    }
+  }
+}
+function ghostY() {
+  let gy = piece.y;
+  while (!collides(piece.cells, piece.x, gy + 1)) gy++;
+  return gy;
+}
+
+function startGame() {
+  grid = Array.from({length: ROWS}, () => Array(COLS).fill(null));
+  bag = [];
+  score = 0; level = 1; lines = 0;
+  comboPopups = [];
+  piece = spawnPiece(nextKey());
+  nextPiece = nextKey();
+  state = 'playing';
+  gravTimer = 0; dropFrac = 0;
+  gravityMs = 800;
+}
+
+function lockPiece() {
+  let topOut = false;
+  for (const [cx, cy] of piece.cells) {
+    const y = piece.y + cy;
+    if (y < 0) { topOut = true; continue; }
+    grid[y][piece.x + cx] = piece.key;
+  }
+  if (topOut) {
+    state = 'over';
+    sfxOver();
+    shake(8, 500);
+    return;
+  }
+  sfxDrop();
+  shake(3, 120);
+
+  const full = [];
+  for (let r = 0; r < ROWS; r++) if (grid[r].every(v => v)) full.push(r);
+
+  if (full.length) {
+    state = 'clearing';
+    clearingRows = full;
+    clearT = 0;
+    sfxClear(full.length);
+    shake(4 + full.length * 2, 260);
+    flashT = full.length >= 4 ? 1 : 0.4;
+    const pts = [0, 100, 300, 500, 800][full.length] * level;
+    score += pts;
+    lines += full.length;
+    comboPopups.push({
+      text: full.length === 4 ? 'TETRIS! +' + pts : '+' + pts,
+      x: boardX + boardW / 2, y: boardY + boardH * 0.4,
+      t: 0, big: full.length === 4
+    });
+    const newLevel = 1 + Math.floor(lines / 10);
+    if (newLevel > level) {
+      level = newLevel;
+      sfxLevel();
+      comboPopups.push({ text: 'LEVEL ' + level, x: boardX + boardW/2, y: boardY + boardH * 0.3, t: 0, big: true });
+    }
+    gravityMs = Math.max(80, 800 * Math.pow(0.85, level - 1));
+  } else {
+    afterLock();
+  }
+}
+function afterLock() {
+  piece = spawnPiece(nextPiece);
+  nextPiece = nextKey();
+  gravTimer = 0; dropFrac = 0;
+  if (collides(piece.cells, piece.x, piece.y)) {
+    state = 'over';
+    sfxOver();
+    shake(8, 500);
+  }
+}
+function finishClear() {
+  clearingRows.sort((a, b) => a - b).forEach(r => {
+    grid.splice(r, 1);
+    grid.unshift(Array(COLS).fill(null));
+  });
+  clearingRows = [];
+  afterLock();
+}
+
+function hardDrop() {
+  const d = ghostY() - piece.y;
+  if (d > 0) {
+    score += d * 2;
+    piece.y += d;
+    shake(2, 90);
+  }
+  lockPiece();
+}
+
+function shake(mag, ms) { shakeMag = mag; shakeT = ms; }
+
+// ---------------------------------------------------------------
+// Input
+// ---------------------------------------------------------------
+const held = {};
+let dasTimer = 0, arrTimer = 0;
+const DAS = 170, ARR = 55;
+
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  if (['ArrowLeft','ArrowRight','ArrowDown','ArrowUp',' '].includes(k)) e.preventDefault();
+
+  if (k === 'm' || k === 'M') { toggleMusic(); return; }
+  if (k === 'p' || k === 'P') {
+    if (state === 'playing') state = 'paused';
+    else if (state === 'paused') state = 'playing';
+    return;
+  }
+  if (k === 'r' || k === 'R') { startGame(); ensureAudio(); return; }
+
+  if (state === 'ready' || state === 'over') {
+    if (k === ' ' || k === 'Enter') { startGame(); ensureAudio(); }
+    return;
+  }
+  if (state !== 'playing' || held[k]) return;
+  held[k] = true;
+  ensureAudio();
+
+  if (k === 'ArrowLeft') { move(-1); dasTimer = 0; arrTimer = 0; }
+  else if (k === 'ArrowRight') { move(1); dasTimer = 0; arrTimer = 0; }
+  else if (k === 'ArrowUp') tryRotate();
+  else if (k === ' ') hardDrop();
+});
+window.addEventListener('keyup', e => { delete held[e.key]; });
+
+function move(dir) {
+  if (!collides(piece.cells, piece.x + dir, piece.y)) {
+    piece.x += dir;
+    sfxMove();
+  }
+}
+
+// ---------------------------------------------------------------
+// Audio — Web Audio chiptune SFX + optional music loop
+// ---------------------------------------------------------------
+let AC = null, masterGain = null, musicGain = null;
+let musicOn = false, musicTimer = null, musicStep = 0;
+
+function ensureAudio() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = AC.createGain(); masterGain.gain.value = 0.5;
+  masterGain.connect(AC.destination);
+  musicGain = AC.createGain(); musicGain.gain.value = 0;
+  musicGain.connect(AC.destination);
+}
+function blip(freq, dur, type, vol, slideTo) {
+  if (!AC) return;
+  const t = AC.currentTime;
+  const o = AC.createOscillator();
+  const g = AC.createGain();
+  o.type = type || 'square';
+  o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+  g.gain.setValueAtTime(vol || 0.15, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g); g.connect(masterGain);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function noiseBurst(dur, vol, freq) {
+  if (!AC) return;
+  const t = AC.currentTime;
+  const len = AC.sampleRate * dur;
+  const buf = AC.createBuffer(1, len, AC.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const f = AC.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = freq || 800;
+  const g = AC.createGain(); g.gain.value = vol || 0.2;
+  src.connect(f); f.connect(g); g.connect(masterGain);
+  src.start(t);
+}
+const sfxMove   = () => blip(220, 0.05, 'square', 0.06);
+const sfxRotate = () => blip(330, 0.07, 'square', 0.08, 440);
+const sfxDrop   = () => { blip(120, 0.12, 'triangle', 0.25, 60); noiseBurst(0.08, 0.12, 500); };
+function sfxClear(n) {
+  if (!AC) return;
+  const t = AC.currentTime;
+  [440, 554, 659, 880].slice(0, 2 + n).forEach((f, i) => {
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'square'; o.frequency.value = f;
+    g.gain.setValueAtTime(0.12, t + i * 0.06);
+    g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.06 + 0.18);
+    o.connect(g); g.connect(masterGain);
+    o.start(t + i * 0.06); o.stop(t + i * 0.06 + 0.2);
+  });
+}
+const sfxLevel = () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => blip(f, 0.15, 'square', 0.12), i * 90)); };
+const sfxOver  = () => { [392, 330, 262, 196].forEach((f, i) => setTimeout(() => blip(f, 0.3, 'sawtooth', 0.14), i * 180)); };
+
+// --- music: a mellow chiptune loop (Korobeiniki-flavored, 8-bar) ---
+const MELODY = [
+  [330,1],[330,1],[196,1],[262,1],[330,1],[0,1],[294,1],[262,1],[220,1],[0,1],
+  [247,1],[247,1],[165,1],[220,1],[247,1],[0,1],[330,1],[0,1],
+  [330,1],[330,1],[196,1],[262,1],[330,1],[0,1],[294,1],[262,1],[220,1],[0,1],
+  [247,1],[247,1],[165,1],[220,1],[247,1],[0,1],[175,1],[0,1]
+];
+const BASS = [0,0,3,3,5,5,3,5]; // semitone offsets from A2
+const BASE_FREQ = 110;
+const SEMI = Math.pow(2, 1/12);
+const STEP_MS = 140;
+
+function musicTick() {
+  if (!AC || !musicOn) return;
+  const t = AC.currentTime;
+  const step = musicStep % MELODY.length;
+  const [note, len] = MELODY[step];
+  if (note) {
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'triangle'; o.frequency.value = note;
+    g.gain.setValueAtTime(0.14, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + STEP_MS / 1000 * 0.9);
+    o.connect(g); g.connect(musicGain);
+    o.start(t); o.stop(t + STEP_MS / 1000);
+  }
+  if (step % 2 === 0) {
+    const off = BASS[(step / 2) % BASS.length];
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = 'square'; o.frequency.value = BASE_FREQ * Math.pow(SEMI, off);
+    g.gain.setValueAtTime(0.05, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + STEP_MS / 1000 * 1.6);
+    o.connect(g); g.connect(musicGain);
+    o.start(t); o.stop(t + STEP_MS / 1000 * 1.7);
+  }
+  musicStep++;
+}
+function toggleMusic() {
+  ensureAudio();
+  musicOn = !musicOn;
+  if (musicOn) {
+    musicGain.gain.setTargetAtTime(0.9, AC.currentTime, 0.2);
+    musicStep = 0;
+    musicTimer = setInterval(musicTick, STEP_MS);
+  } else {
+    musicGain.gain.setTargetAtTime(0, AC.currentTime, 0.15);
+    clearInterval(musicTimer);
+  }
+  document.getElementById('musicBtn').textContent = musicOn ? '♪ music: on' : '♪ music: off';
+}
+document.getElementById('musicBtn').addEventListener('click', toggleMusic);
+
+// ---------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------
+function pencilText(text, x, y, size, align, weight) {
+  ctx.save();
+  ctx.font = `${weight || 700} ${size}px Caveat, 'Architects Daughter', cursive`;
+  ctx.textAlign = align || 'left';
+  ctx.textBaseline = 'top';
+  // pencil: soft double pass
+  ctx.fillStyle = 'rgba(60,55,45,0.25)';
+  ctx.fillText(text, x + 1, y + 1);
+  ctx.fillStyle = '#3d382c';
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+function drawCell(key, px, py, scale, alpha) {
+  const spr = cellSprites[key];
+  if (!spr) return;
+  ctx.save();
+  ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+  const s = CELL * (scale || 1);
+  ctx.drawImage(spr, px - (s - CELL) / 2, py - (s - CELL) / 2, s, s);
+  ctx.restore();
+}
+
+function drawGhost() {
+  if (state !== 'playing') return;
+  const gy = ghostY();
+  if (gy === piece.y) return;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(60,55,45,0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  for (const [cx, cy] of piece.cells) {
+    const x = boardX + 12 + (piece.x + cx) * CELL;
+    const y = boardY + 12 + (gy + cy) * CELL;
+    roundedPath(ctx, x + 2, y + 2, CELL - 4, CELL - 4, 3);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawPiece() {
+  if (state === 'over' || state === 'ready') return;
+  const yPx = piece.y + dropFrac;
+  const a = Math.min(1, piece.animT);
+  for (let i = 0; i < piece.cells.length; i++) {
+    let [cx, cy] = piece.cells[i];
+    if (piece.animFrom && a < 1) {
+      const [fx, fy] = piece.animFrom[i];
+      cx = fx + (cx - fx) * a;
+      cy = fy + (cy - fy) * a;
+    }
+    const px = boardX + 12 + cx * CELL;
+    const py = boardY + 12 + (cy + yPx) * CELL;
+    if (py + CELL > boardY + 12) drawCell(piece.key, px, py, 1, 1);
+  }
+}
+
+function drawBoard() {
+  // board shadow (soft pencil smear)
+  ctx.save();
+  ctx.fillStyle = 'rgba(70,60,40,0.12)';
+  ctx.fillRect(boardX + 6, boardY + 8, boardW + 24, boardH + 24);
+  ctx.restore();
+
+  // grid texture
+  ctx.drawImage(gridCv, boardX, boardY);
+
+  // settled blocks (clipped to the board so spawn rows stay hidden)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(boardX + 12, boardY + 12, boardW, boardH);
+  ctx.clip();
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const key = grid && grid[r] && grid[r][c];
+      if (!key) continue;
+      let scale = 1, alpha = 1;
+      if (state === 'clearing' && clearingRows.includes(r)) {
+        const p = clearT / 320;
+        scale = 1 + Math.sin(p * Math.PI) * 0.12;
+        alpha = 1 - p * p;
+      }
+      drawCell(key, boardX + 12 + c * CELL, boardY + 12 + r * CELL, scale, alpha);
+    }
+  }
+
+  // clear-row flash (chalky white)
+  if (state === 'clearing') {
+    const p = clearT / 320;
+    ctx.save();
+    ctx.globalAlpha = (1 - p) * 0.75;
+    ctx.fillStyle = '#fff8e8';
+    for (const r of clearingRows) {
+      const h = CELL * (1 - p * 0.6);
+      ctx.fillRect(boardX + 12, boardY + 12 + r * CELL + (CELL - h) / 2, boardW, h);
+    }
+    ctx.restore();
+  }
+
+  drawGhost();
+  drawPiece();
+  ctx.restore();
+}
+
+function drawNext() {
+  pencilText('NEXT', nextX + nextSize / 2, nextY - 46, 34, 'center');
+  // panel
+  ctx.save();
+  ctx.strokeStyle = 'rgba(60,55,45,0.8)';
+  ctx.lineWidth = 1.6;
+  const rnd = mulberry32(5);
+  roundedPath(ctx, nextX, nextY, nextSize, nextSize, 4);
+  ctx.stroke();
+  ctx.restore();
+
+  if (nextPiece) {
+    const cells = SHAPES[nextPiece];
+    const xs = cells.map(c => c[0]), ys = cells.map(c => c[1]);
+    const bw = Math.max(...xs) - Math.min(...xs) + 1;
+    const bh = Math.max(...ys) - Math.min(...ys) + 1;
+    const nc = Math.min(CELL, nextSize / (Math.max(bw, bh) + 1.5));
+    const ox = nextX + (nextSize - bw * nc) / 2 - Math.min(...xs) * nc;
+    const oy = nextY + (nextSize - bh * nc) / 2 - Math.min(...ys) * nc;
+    for (const [cx, cy] of cells) {
+      const spr = cellSprites[nextPiece];
+      ctx.drawImage(spr, ox + cx * nc - (nc - CELL) / 2, oy + cy * nc - (nc - CELL) / 2, nc, nc);
+    }
+  }
+}
+
+function drawStats() {
+  pencilText('SCORE', sideX, scoreY, 30, 'left');
+  pencilText(String(score).padStart(5, ' '), sideX, scoreY + 30, 44, 'left');
+  pencilText('LEVEL', sideX, levelY, 30, 'left');
+  pencilText(String(level).padStart(2, '0'), sideX, levelY + 30, 44, 'left');
+}
+
+function drawPopups(dt) {
+  for (const p of comboPopups) {
+    p.t += dt;
+    const life = p.big ? 1400 : 900;
+    if (p.t > life) continue;
+    const k = p.t / life;
+    ctx.save();
+    ctx.globalAlpha = 1 - k * k;
+    ctx.font = `700 ${p.big ? 52 : 36}px Caveat, cursive`;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#3d382c';
+    ctx.fillText(p.text, p.x, p.y - k * 30);
+    ctx.restore();
+  }
+  comboPopups = comboPopups.filter(p => p.t <= (p.big ? 1400 : 900));
+}
+
+function drawOverlay(title, sub) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(214,207,186,0.6)';
+  ctx.fillRect(boardX, boardY, boardW + 24, boardH + 24);
+  ctx.restore();
+  pencilText(title, boardX + boardW / 2 + 12, boardY + boardH / 2 - 60, 58, 'center');
+  pencilText(sub, boardX + boardW / 2 + 12, boardY + boardH / 2 + 10, 30, 'center');
+}
+
+// ---------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------
+function update(dt) {
+  if (state === 'playing') {
+    // DAS / ARR for held keys
+    if (held['ArrowLeft'] || held['ArrowRight']) {
+      const dir = held['ArrowLeft'] ? -1 : 1;
+      dasTimer += dt;
+      if (dasTimer > DAS) {
+        arrTimer += dt;
+        while (arrTimer > ARR) { arrTimer -= ARR; move(dir); }
+      }
+    }
+    // gravity — smooth fractional drop
+    if (held['ArrowDown']) {
+      gravTimer += dt * 18;
+    } else {
+      gravTimer += dt;
+    }
+    const interval = gravityMs;
+    while (gravTimer >= interval) {
+      gravTimer -= interval;
+      if (!collides(piece.cells, piece.x, piece.y + 1)) {
+        piece.y++;
+        dropFrac = 0;
+        if (held['ArrowDown']) score += 1;
+      } else {
+        lockPiece();
+        break;
+      }
+    }
+    // fractional render position for buttery motion
+    if (state === 'playing') {
+      dropFrac = Math.min(0.999, gravTimer / interval);
+    }
+    // rotation animation
+    if (piece.animT < 1) piece.animT = Math.min(1, piece.animT + dt / 110);
+  }
+  else if (state === 'clearing') {
+    clearT += dt;
+    if (clearT >= 320) finishClear();
+  }
+  if (shakeT > 0) shakeT -= dt;
+  if (flashT > 0) flashT = Math.max(0, flashT - dt / 250);
+}
+
+function frame(t) {
+  const dt = Math.min(50, t - lastTime);
+  lastTime = t;
+
+  update(dt);
+
+  // shake offset
+  let sx = 0, sy = 0;
+  if (shakeT > 0) {
+    const m = shakeMag * (shakeT / 260);
+    sx = (Math.random() - 0.5) * m;
+    sy = (Math.random() - 0.5) * m;
+  }
+
+  ctx.save();
+  ctx.translate(sx, sy);
+
+  // paper
+  ctx.drawImage(paperCv, 0, 0);
+
+  if (grid) {
+    drawBoard();
+    drawNext();
+    drawStats();
+    drawPopups(dt);
+  }
+
+  if (state === 'ready') drawOverlay('TETRIS', 'press SPACE to start');
+  else if (state === 'paused') drawOverlay('PAUSED', 'press P to resume');
+  else if (state === 'over') drawOverlay('GAME OVER', 'score ' + score + '  ·  press R to restart');
+
+  ctx.restore();
+
+  // film grain rolls on top of everything, always
+  drawGrain(t);
+
+  // line-clear flash
+  if (flashT > 0) {
+    ctx.save();
+    ctx.globalAlpha = flashT * 0.35;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
+  requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------
+resize();
+buildCellSprites();
+buildGrain();
+startGame();
+state = 'ready';
+requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
