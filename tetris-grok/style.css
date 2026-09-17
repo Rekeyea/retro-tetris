@@ -1,0 +1,198 @@
+/* Retro Tetris — aged paper / film grain styling */
+
+:root {
+  --paper: #e3d9c2;
+  --paper-dark: #cfc3a8;
+  --ink: #3b3327;
+  --ink-soft: #5a5040;
+  --line: #8a7f68;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Patrick Hand', 'Comic Sans MS', cursive;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+/* film grain + vignette sit above everything, pointer-transparent */
+#grain {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 50;
+  mix-blend-mode: multiply;
+  opacity: 0.55;
+}
+
+#vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 51;
+  background:
+    radial-gradient(ellipse at center,
+      rgba(0,0,0,0) 55%,
+      rgba(58,44,24,0.28) 88%,
+      rgba(40,28,12,0.5) 100%);
+}
+
+#app {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+  transform: rotate(-0.4deg);
+  user-select: none;
+}
+
+/* ---------- board ---------- */
+
+#board-wrap {
+  position: relative;
+  background: rgba(255, 252, 240, 0.25);
+  padding: 10px;
+  border: 2px solid var(--ink);
+  border-radius: 6px 10px 8px 12px / 10px 6px 12px 8px;
+  box-shadow:
+    3px 4px 0 rgba(59, 51, 39, 0.25),
+    inset 0 0 40px rgba(120, 100, 60, 0.18);
+}
+
+#board {
+  display: block;
+  background: transparent;
+}
+
+#overlay {
+  position: absolute;
+  inset: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(227, 217, 194, 0.82);
+  z-index: 10;
+}
+
+#overlay.hidden { display: none; }
+
+#overlay-title {
+  font-family: 'Caveat', cursive;
+  font-size: 56px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  transform: rotate(-2deg);
+  border-bottom: 3px solid var(--ink);
+  padding: 0 18px 4px;
+}
+
+#overlay-sub {
+  font-size: 20px;
+  color: var(--ink-soft);
+}
+
+/* ---------- side panels ---------- */
+
+#side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 190px;
+}
+
+.panel {
+  background: rgba(255, 252, 240, 0.3);
+  border: 2px solid var(--ink);
+  border-radius: 8px 5px 9px 6px / 5px 9px 6px 8px;
+  padding: 10px 12px;
+  box-shadow: 2px 3px 0 rgba(59, 51, 39, 0.22);
+}
+
+.panel:nth-child(odd) { transform: rotate(0.5deg); }
+.panel:nth-child(even) { transform: rotate(-0.6deg); }
+
+.label {
+  font-size: 20px;
+  letter-spacing: 3px;
+  color: var(--ink-soft);
+  margin-bottom: 2px;
+}
+
+.big {
+  font-family: 'Caveat', cursive;
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1;
+  transform: rotate(-1deg);
+}
+
+#score.pop { animation: scorepop 0.35s ease; }
+
+@keyframes scorepop {
+  0%   { transform: rotate(-1deg) scale(1); }
+  35%  { transform: rotate(-3deg) scale(1.28); color: #7a4b21; }
+  100% { transform: rotate(-1deg) scale(1); }
+}
+
+#next { display: block; margin: 4px auto 0; }
+#hold { display: block; margin: 4px auto 0; }
+
+.lines-label { margin-top: 10px; }
+
+/* ---------- buttons ---------- */
+
+.hand-btn {
+  display: block;
+  width: 100%;
+  font-family: 'Patrick Hand', cursive;
+  font-size: 18px;
+  letter-spacing: 1px;
+  color: var(--ink);
+  background: rgba(255, 252, 240, 0.45);
+  border: 2px solid var(--ink);
+  border-radius: 6px 4px 7px 5px / 4px 7px 5px 6px;
+  padding: 6px 8px;
+  margin-top: 8px;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 rgba(59, 51, 39, 0.3);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+
+.hand-btn:first-child { margin-top: 0; }
+
+.hand-btn:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 rgba(59, 51, 39, 0.3); }
+.hand-btn:active { transform: translate(1px, 1px); box-shadow: 0 0 0 rgba(59, 51, 39, 0.3); }
+
+.hand-btn.on { background: #d8c9a3; }
+
+/* ---------- help ---------- */
+
+#help {
+  list-style: none;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+/* ---------- small screens ---------- */
+
+@media (max-width: 760px) {
+  #app { flex-direction: column; align-items: center; gap: 14px; }
+  #side { flex-direction: row; flex-wrap: wrap; width: auto; justify-content: center; }
+  .panel { padding: 6px 10px; }
+  .big { font-size: 30px; }
+  #help-panel { display: none; }
+}

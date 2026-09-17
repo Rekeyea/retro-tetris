@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Retro Tetris — Film Grain Edition</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Caveat:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <div id="board-wrap">
+      <canvas id="board"></canvas>
+      <div id="overlay" class="hidden">
+        <div id="overlay-title">PAUSED</div>
+        <div id="overlay-sub">press P to resume</div>
+      </div>
+    </div>
+
+    <aside id="side">
+      <div class="panel" id="hold-panel">
+        <div class="label">HOLD</div>
+        <canvas id="hold"></canvas>
+      </div>
+
+      <div class="panel" id="next-panel">
+        <div class="label">NEXT</div>
+        <canvas id="next"></canvas>
+      </div>
+
+      <div class="panel" id="score-panel">
+        <div class="label">SCORE</div>
+        <div id="score" class="big">0</div>
+      </div>
+
+      <div class="panel" id="level-panel">
+        <div class="label">LEVEL</div>
+        <div id="level" class="big">01</div>
+        <div class="label lines-label">LINES</div>
+        <div id="lines" class="big">0</div>
+      </div>
+
+      <div class="panel" id="music-panel">
+        <button id="music-btn" class="hand-btn" type="button">♪ MUSIC: OFF</button>
+        <button id="sfx-btn" class="hand-btn" type="button">SFX: ON</button>
+      </div>
+
+      <div class="panel" id="help-panel">
+        <div class="label">CONTROLS</div>
+        <ul id="help">
+          <li>← → &nbsp;move</li>
+          <li>↓ &nbsp;soft drop</li>
+          <li>↑ / X &nbsp;rotate ⟳</li>
+          <li>Z &nbsp;rotate ⟲</li>
+          <li>SPACE &nbsp;hard drop</li>
+          <li>C &nbsp;hold</li>
+          <li>P &nbsp;pause &nbsp;·&nbsp; M &nbsp;music</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
+  <canvas id="grain"></canvas>
+  <div id="vignette"></div>
+
+  <script src="audio.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
